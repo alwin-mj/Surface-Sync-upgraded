@@ -1,0 +1,552 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SurfaceSync | Receiver</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
+<script>tailwind.config={theme:{extend:{fontFamily:{sans:['Inter','sans-serif']}}}}</script>
+<style>
+body{background:#F2F2F7;color:#1d1d1f;overflow-x:hidden}
+.al{position:fixed;border-radius:50%;filter:blur(80px);z-index:-1;opacity:.6;animation:fl 10s ease-in-out infinite}
+.l1{top:-10%;left:-10%;width:50vw;height:50vw;background:rgba(96,165,250,.4)}
+.l2{bottom:-10%;right:-10%;width:60vw;height:60vw;background:rgba(216,180,254,.3)}
+.l3{top:40%;left:30%;width:40vw;height:40vw;background:rgba(209,250,229,.4);animation-delay:-5s}
+@keyframes fl{0%,100%{transform:translate(0,0)}50%{transform:translate(20px,-20px)}}
+.gc{background:rgba(255,255,255,.65);backdrop-filter:blur(45px);-webkit-backdrop-filter:blur(45px);border:1px solid rgba(255,255,255,.4);box-shadow:0 8px 32px 0 rgba(31,38,135,.05)}
+.ls::-webkit-scrollbar{width:6px}.ls::-webkit-scrollbar-track{background:transparent}.ls::-webkit-scrollbar-thumb{background:rgba(0,0,0,.1);border-radius:20px}
+canvas{image-rendering:-webkit-optimize-contrast}
+.mo{position:fixed;inset:0;background:rgba(0,0,0,.5);backdrop-filter:blur(5px);display:flex;align-items:center;justify-content:center;z-index:1000;opacity:0;visibility:hidden;transition:all .3s}
+.mo.on{opacity:1;visibility:visible}
+.mc{background:rgba(255,255,255,.97);border-radius:24px;padding:2rem;max-width:540px;width:92%;transform:scale(.9);transition:transform .3s;max-height:85vh;overflow-y:auto}
+.mo.on .mc{transform:scale(1)}
+</style>
+</head>
+<body class="min-h-screen flex items-center justify-center p-4 md:p-8">
+<div class="al l1"></div><div class="al l2"></div><div class="al l3"></div>
+
+<main class="w-full max-w-6xl grid grid-cols-1 lg:grid-cols-12 gap-5">
+
+<!-- Header -->
+<header class="lg:col-span-12 gc rounded-3xl p-5 flex justify-between items-center">
+  <div class="flex items-center gap-3">
+    <div id="dot" class="w-3 h-3 rounded-full bg-gray-400"></div>
+    <h1 class="text-xl font-semibold text-gray-800">SurfaceSync <span class="text-gray-400 font-light">| Receiver</span></h1>
+  </div>
+  <div id="bannerWrap" class="flex items-center gap-2 px-3 py-1.5 rounded-full bg-red-50 border border-red-200">
+    <div id="bannerDot" class="w-2 h-2 rounded-full bg-red-400"></div>
+    <span id="bannerTxt" class="text-xs font-medium text-red-600">Backend offline</span>
+  </div>
+</header>
+
+<!-- Left -->
+<section class="lg:col-span-4 flex flex-col gap-4">
+
+  <!-- Backend alert -->
+  <div id="backendBox" class="gc rounded-2xl p-4 bg-red-50/60 border border-red-200/60">
+    <p class="text-xs font-semibold text-red-700 mb-1">Backend not detected</p>
+    <p class="text-xs text-red-600">Run: <code class="bg-red-100 px-1 rounded">python receiver_backend.py</code></p>
+    <p class="text-xs text-red-500 mt-1">Then open <code class="bg-red-100 px-1 rounded">http://localhost:5002/</code></p>
+    <button onclick="checkBackend()" class="mt-2 text-xs px-3 py-1 rounded-lg bg-red-600 text-white hover:bg-red-700 transition">Retry</button>
+  </div>
+
+  <!-- Connection -->
+  <div class="gc rounded-3xl p-5 flex flex-col gap-3">
+    <h3 class="text-base font-semibold text-gray-800">Connection</h3>
+    <div class="flex gap-2">
+      <select id="portSel" class="flex-1 rounded-xl border border-white/50 bg-white/40 p-2.5 text-sm outline-none">
+        <option value="">Auto-detect</option>
+      </select>
+      <button onclick="refreshPorts()" class="px-3 py-2 rounded-xl bg-white/60 border border-white/50 text-sm text-gray-600 hover:bg-white transition">↻</button>
+    </div>
+    <input type="password" id="aesKey" value="SurfaceSyncSecretKey2025" placeholder="AES-256 key"
+           class="rounded-xl border border-white/50 bg-white/40 p-2.5 text-sm outline-none focus:ring-2 focus:ring-blue-500/20">
+    <button onclick="toggleListen()" id="listenBtn"
+            class="w-full py-2.5 rounded-xl bg-green-600 text-white text-sm font-semibold hover:bg-green-700 transition">
+      ▶ Start Listening
+    </button>
+    <button onclick="calibrate()" class="w-full py-2 rounded-xl bg-white/60 border border-white/50 text-sm text-gray-600 hover:bg-white transition">
+      Calibrate Noise Floor
+    </button>
+    <div id="connStatus" class="text-xs text-center text-gray-400">Not started</div>
+  </div>
+
+  <!-- CNN status -->
+  <div class="gc rounded-3xl p-4">
+    <div class="flex justify-between items-center mb-2">
+      <h3 class="text-sm font-semibold text-gray-800">1D-CNN Status</h3>
+      <span id="cnnBadge" class="hidden text-xs px-2 py-0.5 rounded-full font-medium bg-orange-100 text-orange-700">FFT mode</span>
+    </div>
+    <div id="cnnBox" class="p-3 rounded-xl bg-yellow-50 border border-yellow-200 text-xs text-yellow-700">
+      Start listening to initialise CNN.
+    </div>
+    <div id="cnnStats" class="hidden mt-2 flex gap-2">
+      <div class="flex-1 bg-purple-100 rounded-lg p-2 text-center">
+        <p id="cnnPct" class="text-base font-bold text-purple-700">—</p>
+        <p class="text-xs text-purple-600">CNN</p>
+      </div>
+      <div class="flex-1 bg-orange-100 rounded-lg p-2 text-center">
+        <p id="fftPct" class="text-base font-bold text-orange-700">—</p>
+        <p class="text-xs text-orange-600">FFT fallback</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- Signal stats -->
+  <div class="grid grid-cols-2 gap-3">
+    <div class="gc rounded-2xl p-4">
+      <p class="text-xs text-gray-500">ECC Repairs</p>
+      <p id="ecc" class="text-2xl font-bold text-gray-800 mt-1">0</p>
+    </div>
+    <div class="gc rounded-2xl p-4">
+      <p class="text-xs text-gray-500">SNR</p>
+      <p id="snr" class="text-2xl font-bold text-gray-800 mt-1">—</p>
+      <p class="text-xs text-gray-400">dB</p>
+    </div>
+    <div class="gc rounded-2xl p-4 col-span-2">
+      <p class="text-xs text-gray-500 mb-2">Signal Level</p>
+      <div class="w-full bg-gray-200/50 rounded-full h-2 overflow-hidden">
+        <div id="sigBar" class="bg-blue-500 h-2 rounded-full transition-all duration-300" style="width:0%"></div>
+      </div>
+      <p id="freqDisp" class="text-xs text-right mt-1 text-gray-400">0 Hz</p>
+    </div>
+  </div>
+</section>
+
+<!-- Right -->
+<section class="lg:col-span-8 flex flex-col gap-4">
+
+  <!-- Waveform -->
+  <div class="gc rounded-3xl overflow-hidden relative h-40">
+    <p class="absolute top-3 left-4 text-xs font-semibold text-gray-400 uppercase tracking-wider z-10">Acoustic Input</p>
+    <canvas id="waveC" class="w-full h-full"></canvas>
+  </div>
+
+  <!-- Tap / Vibration Indicator -->
+  <div id="tapCard" class="gc rounded-2xl p-4 flex items-center gap-4 transition-all duration-150">
+    <div id="tapDot" class="w-12 h-12 rounded-full bg-gray-200 flex items-center justify-center flex-shrink-0 transition-all duration-100">
+      <svg id="tapIcon" class="w-6 h-6 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+          d="M15.536 8.464a5 5 0 010 7.072M12 18.5v.5m0-13v.5m-3.536-.536a5 5 0 000 7.072
+             M5.636 5.636a9 9 0 0112.728 0M18.364 18.364a9 9 0 01-12.728 0"/>
+      </svg>
+    </div>
+    <div class="flex-1">
+      <p class="text-sm font-semibold text-gray-700">Surface Vibration</p>
+      <p id="tapStatus" class="text-xs text-gray-400 mt-0.5">Waiting for signal…</p>
+    </div>
+    <div class="text-right">
+      <p class="text-xs text-gray-400">Taps detected</p>
+      <p id="tapCount" class="text-2xl font-bold text-gray-800">0</p>
+    </div>
+    <div class="text-right ml-2">
+      <p class="text-xs text-gray-400">RMS</p>
+      <p id="tapRms" class="text-sm font-mono text-gray-600">—</p>
+    </div>
+  </div>
+
+  <!-- Threshold control -->
+  <div class="gc rounded-2xl p-3 flex items-center gap-3">
+    <p class="text-xs text-gray-500 flex-shrink-0">Sensitivity</p>
+    <input type="range" id="thrSlider" min="1" max="100" value="50"
+           class="flex-1" oninput="updateThreshold(this.value)">
+    <p class="text-xs font-mono text-gray-600 w-16 text-right" id="thrVal">auto</p>
+    <button onclick="resetThreshold()"
+            class="text-xs px-2 py-1 rounded-lg bg-white/60 border border-white/50 text-gray-600 hover:bg-white transition">Auto</button>
+  </div>
+
+  <!-- Calibration complete banner -->
+  <div id="calBanner" style="display:none"
+       class="rounded-xl p-3 text-sm font-medium text-center"
+       style="background:rgba(34,197,94,0.15);border:1px solid rgba(34,197,94,0.4);color:#15803d">
+  </div>
+
+  <!-- Progress -->
+  <div class="gc rounded-2xl p-4">
+    <div class="flex justify-between mb-2">
+      <p class="text-sm font-semibold text-gray-700">Reception Progress</p>
+      <p id="progPct" class="text-sm font-bold text-blue-600">0%</p>
+    </div>
+    <div class="w-full bg-gray-200/60 rounded-full h-2 mb-2 overflow-hidden">
+      <div id="progBar" class="bg-blue-500 h-2 rounded-full transition-all duration-300" style="width:0%"></div>
+    </div>
+    <div class="flex justify-between text-xs text-gray-400">
+      <span id="pktsRx">0 / 0 packets</span>
+      <span id="surfLbl">Surface: —</span>
+    </div>
+  </div>
+
+  <!-- Sub-parts -->
+  <div class="gc rounded-2xl p-4">
+    <p class="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Sub-part Pipeline</p>
+    <div id="spGrid" class="flex flex-wrap gap-2">
+      <p class="text-xs text-gray-400">Waiting for transmission…</p>
+    </div>
+  </div>
+
+  <!-- Files -->
+  <div class="gc rounded-2xl p-4">
+    <div class="flex justify-between items-center mb-2">
+      <p class="text-xs font-semibold text-gray-400 uppercase tracking-wider">Received Files</p>
+      <button onclick="refreshFiles()" class="text-xs text-blue-500 hover:underline">Refresh</button>
+    </div>
+    <div id="fileList" class="space-y-2 max-h-40 overflow-y-auto ls">
+      <p class="text-xs text-gray-400">No files yet.</p>
+    </div>
+  </div>
+
+  <!-- Log -->
+  <div class="gc rounded-2xl p-4 flex flex-col" style="height:200px">
+    <div class="flex justify-between items-center mb-2 border-b border-gray-200/50 pb-2">
+      <p class="text-xs font-semibold text-gray-400 uppercase tracking-wider">System Log</p>
+      <button onclick="clearLog()" class="text-xs text-blue-500 hover:underline">Clear</button>
+    </div>
+    <div id="logW" class="ls flex-1 overflow-y-auto font-mono text-xs space-y-0.5 text-gray-600"></div>
+  </div>
+</section>
+</main>
+
+<!-- File ready modal -->
+<div id="modal" class="mo" onclick="if(event.target===this)closeModal()">
+  <div class="mc">
+    <div class="flex justify-between items-center mb-4">
+      <h3 class="text-lg font-semibold text-gray-800">File Received</h3>
+      <button onclick="closeModal()" class="text-gray-400 hover:text-gray-700 text-xl">✕</button>
+    </div>
+    <div id="modalMeta" class="bg-gray-50 rounded-xl p-4 text-sm space-y-1 mb-3"></div>
+    <div id="modalText" class="hidden bg-gray-50 rounded-xl p-4 text-xs font-mono whitespace-pre-wrap max-h-60 overflow-y-auto mb-3 ls"></div>
+    <a id="modalDl" href="#" download
+       class="block w-full text-center py-3 rounded-2xl bg-gradient-to-b from-[#007AFF] to-[#0062CC] text-white font-semibold shadow hover:shadow-lg transition">
+      Download File
+    </a>
+  </div>
+</div>
+
+<script>
+const API = 'http://localhost:5002';
+let listening  = false;
+let backendOk  = false;
+const waveC    = document.getElementById('waveC');
+const waveCtx  = waveC.getContext('2d');
+function rsz(){ waveC.width=waveC.offsetWidth; waveC.height=waveC.offsetHeight; }
+window.addEventListener('resize', rsz); rsz();
+
+// ── Socket.IO ─────────────────────────────────────────────────────────────────
+const socket = io(API, {reconnection:true, reconnectionDelay:2000,
+                        reconnectionAttempts:Infinity, timeout:3000});
+socket.on('connect',       () => { setBackend(true);  lg('Connected to RX backend.','SUCCESS'); });
+socket.on('disconnect',    () => { setBackend(false); lg('Disconnected.','ERROR'); });
+socket.on('connect_error', () =>   setBackend(false));
+
+socket.on('status', d => {
+    setDot(d.state);
+    if (d.surface) { document.getElementById('surfLbl').textContent='Surface: '+d.surface; }
+});
+socket.on('log',    d => lg(d.message, d.level));
+socket.on('progress', d => {
+    document.getElementById('progBar').style.width = d.percent+'%';
+    document.getElementById('progPct').textContent = Math.round(d.percent)+'%';
+    document.getElementById('pktsRx').textContent  = d.received+' / '+d.total+' packets';
+});
+
+socket.on('ecc', d => { document.getElementById('ecc').textContent = d.count; });
+socket.on('cnn_status', d => {
+    const box   = document.getElementById('cnnBox');
+    const badge = document.getElementById('cnnBadge');
+    badge.classList.remove('hidden');
+    if (d.trained) {
+        box.className='p-3 rounded-xl bg-green-50 border border-green-200 text-xs text-green-700 font-medium';
+        box.textContent='CNN active — neural symbol decode.';
+        badge.className='text-xs px-2 py-0.5 rounded-full font-medium bg-green-100 text-green-700';
+        badge.textContent='CNN';
+    } else {
+        box.className='p-3 rounded-xl bg-orange-50 border border-orange-200 text-xs text-orange-700';
+        box.textContent=d.message||'FFT fallback active.';
+        badge.className='text-xs px-2 py-0.5 rounded-full font-medium bg-orange-100 text-orange-700';
+        badge.textContent='FFT';
+    }
+});
+socket.on('cnn_stats', d => {
+    document.getElementById('cnnStats').classList.remove('hidden');
+    document.getElementById('cnnPct').textContent = d.cnn_pct+'%';
+    document.getElementById('fftPct').textContent = (100-d.cnn_pct)+'%';
+});
+socket.on('sweep_result', d => {
+    document.getElementById('surfLbl').textContent = 'Surface: '+d.surface;
+    lg('Surface: '+d.surface,'SUCCESS');
+});
+socket.on('subpart_done', d => {
+    const g = document.getElementById('spGrid');
+    if (!document.getElementById('sp'+d.sub_id)) g.innerHTML='';
+    let b = document.getElementById('sp'+d.sub_id);
+    if (!b){ b=document.createElement('div'); b.id='sp'+d.sub_id; g.appendChild(b); }
+    b.className='text-xs px-2 py-1 rounded-lg font-medium bg-green-100 text-green-700';
+    b.textContent='#'+(d.sub_id+1)+'/'+d.sub_total;
+    lg('Sub-part '+(d.sub_id+1)+'/'+d.sub_total+' decrypted','SUCCESS');
+});
+socket.on('calibration_done', d => {
+    const nf  = d.noise_floor  ? d.noise_floor.toFixed(1)  : '?';
+    const thr = d.tap_threshold ? d.tap_threshold.toFixed(1) : '?';
+    document.getElementById('connStatus').textContent = 'Calibrated. Noise='+nf+' Thr='+thr;
+    document.getElementById('connStatus').style.color = '#16a34a';
+    document.getElementById('thrVal').textContent = thr+' cts';
+    const sv = Math.round(((parseFloat(thr)-40)/760)*100);
+    document.getElementById('thrSlider').value = Math.max(1,Math.min(100,sv));
+    lg('Noise floor: '+nf+' ADC counts  →  tap threshold: '+thr+' counts','SUCCESS');
+});
+
+socket.on('calibration_complete', d => {
+    lg('✓ CALIBRATION COMPLETE — '+d.message,'SUCCESS');
+    const banner = document.getElementById('calBanner');
+    if (banner){ banner.textContent='✓ '+d.message; banner.style.display='block'; setTimeout(()=>{ banner.style.display='none'; },8000); }
+    document.getElementById('tapStatus').textContent = 'Calibrated — tap the piezo disc now!';
+    document.getElementById('tapStatus').style.color = '#16a34a';
+});
+socket.on('waveform_raw',   d => drawWave(d.samples,'#3b82f6'));
+socket.on('waveform_clean', d => drawWave(d.samples,'#10b981'));
+socket.on('file_ready', d => {
+    lg('File ready: '+d.filename+' ('+fmtB(d.size)+')','SUCCESS');
+    showModal(d); refreshFiles();
+});
+
+// ── Backend health ────────────────────────────────────────────────────────────
+function setBackend(ok) {
+    backendOk = ok;
+    const bx  = document.getElementById('backendBox');
+    const bw  = document.getElementById('bannerWrap');
+    const bd  = document.getElementById('bannerDot');
+    const bt  = document.getElementById('bannerTxt');
+    if (ok) {
+        bx.style.display='none';
+        bw.className='flex items-center gap-2 px-3 py-1.5 rounded-full bg-green-50 border border-green-200';
+        bd.className='w-2 h-2 rounded-full bg-green-500';
+        bt.className='text-xs font-medium text-green-700'; bt.textContent='Backend online';
+    } else {
+        bx.style.display='';
+        bw.className='flex items-center gap-2 px-3 py-1.5 rounded-full bg-red-50 border border-red-200';
+        bd.className='w-2 h-2 rounded-full bg-red-400';
+        bt.className='text-xs font-medium text-red-600'; bt.textContent='Backend offline';
+    }
+}
+async function checkBackend() {
+    try {
+        const r = await fetch(API+'/ping',{signal:AbortSignal.timeout(2000)});
+        if (r.ok){ setBackend(true); lg('Backend reachable.','SUCCESS'); refreshPorts(); refreshFiles(); }
+        else setBackend(false);
+    } catch(e){ setBackend(false); lg('Cannot reach backend. Run python receiver_backend.py','ERROR'); }
+}
+
+// ── Log ───────────────────────────────────────────────────────────────────────
+function lg(msg,type) {
+    const d=document.createElement('div');
+    const ts=new Date().toLocaleTimeString('en-US',{hour12:false});
+    const c={SUCCESS:'color:#16a34a',DATA:'color:#2563eb',ERROR:'color:#dc2626'}[type]||'color:#6b7280';
+    d.innerHTML=`<span style="${c}">[${ts}]</span> ${msg}`;
+    const w=document.getElementById('logW');
+    w.appendChild(d); w.scrollTop=w.scrollHeight;
+}
+function clearLog(){ document.getElementById('logW').innerHTML=''; lg('Log cleared.'); }
+
+// ── Status dot ────────────────────────────────────────────────────────────────
+function setDot(state) {
+    const m={idle:'bg-gray-400',listening:'bg-blue-400 animate-pulse',
+             receiving:'bg-green-500 animate-pulse',done:'bg-purple-400',error:'bg-red-500'};
+    document.getElementById('dot').className='w-3 h-3 rounded-full '+(m[state]||m.idle);
+}
+
+// ── Ports ─────────────────────────────────────────────────────────────────────
+async function refreshPorts() {
+    if (!backendOk){ lg('Backend offline.','ERROR'); return; }
+    try {
+        const r=await fetch(API+'/list_ports',{signal:AbortSignal.timeout(3000)});
+        const d=await r.json();
+        const sel=document.getElementById('portSel');
+        sel.innerHTML='<option value="">Auto-detect</option>';
+        if (d.ports.length===0){ lg('No serial ports found. Plug in USB cable.','ERROR'); return; }
+        d.ports.forEach(p=>{ const o=document.createElement('option'); o.value=p.device; o.text=p.device+' – '+p.description; sel.appendChild(o); });
+        if (d.ports.length===1) sel.value=d.ports[0].device;
+        lg('Found '+d.ports.length+' port(s).','SUCCESS');
+    } catch(e){ lg('Port list failed: '+e.message,'ERROR'); }
+}
+
+// ── Listen toggle ─────────────────────────────────────────────────────────────
+async function toggleListen() {
+    if (!backendOk){ lg('Backend offline.','ERROR'); return; }
+    const btn=document.getElementById('listenBtn');
+    if (!listening) {
+        const port=document.getElementById('portSel').value;
+        const key=document.getElementById('aesKey').value;
+        if (key.length<8){ lg('AES key must be >= 8 chars.','ERROR'); return; }
+        try {
+            await fetch(API+'/set_key',{method:'POST',headers:{'Content-Type':'application/json'},
+                                        body:JSON.stringify({password:key}),signal:AbortSignal.timeout(3000)});
+            const r=await fetch(API+'/start_listening',{method:'POST',
+                headers:{'Content-Type':'application/json'},
+                body:JSON.stringify({port:port||undefined,baud:921600}),
+                signal:AbortSignal.timeout(5000)});
+            const d=await r.json();
+            if (r.ok){
+                listening=true;
+                btn.textContent='⏹ Stop Listening';
+                btn.className='w-full py-2.5 rounded-xl bg-red-500 text-white text-sm font-semibold hover:bg-red-600 transition';
+                document.getElementById('connStatus').textContent='Listening…';
+                lg('Listening started.','SUCCESS');
+            } else { lg('Start failed: '+d.error,'ERROR'); }
+        } catch(e){ lg('Start failed: '+e.message,'ERROR'); }
+    } else {
+        try { await fetch(API+'/stop_listening',{method:'POST',signal:AbortSignal.timeout(3000)}); } catch(e){}
+        listening=false;
+        btn.textContent='▶ Start Listening';
+        btn.className='w-full py-2.5 rounded-xl bg-green-600 text-white text-sm font-semibold hover:bg-green-700 transition';
+        document.getElementById('connStatus').textContent='Stopped';
+        setDot('idle'); lg('Stopped.','INFO');
+    }
+}
+
+async function calibrate() {
+    if (!backendOk||!listening){ lg('Start listening first.','ERROR'); return; }
+    try {
+        const r=await fetch(API+'/calibrate',{method:'POST',signal:AbortSignal.timeout(3000)});
+        if (r.ok) lg('Calibration started (5 s)…','INFO');
+        else { const d=await r.json(); lg('Error: '+d.error,'ERROR'); }
+    } catch(e){ lg('Calibrate failed: '+e.message,'ERROR'); }
+}
+
+// ── Waveform ──────────────────────────────────────────────────────────────────
+function drawWave(samples, color) {
+    const w=waveC.width, h=waveC.height;
+    waveCtx.clearRect(0,0,w,h);
+    if (!samples||samples.length===0) return;
+    const mx=Math.max(...samples.map(Math.abs))||1;
+    waveCtx.lineWidth=1.5; waveCtx.strokeStyle=color; waveCtx.beginPath();
+    samples.forEach((v,i)=>{
+        const x=i*(w/samples.length), y=h/2+v/mx*(h*0.4);
+        i===0?waveCtx.moveTo(x,y):waveCtx.lineTo(x,y);
+    });
+    waveCtx.stroke();
+}
+
+// ── File list ─────────────────────────────────────────────────────────────────
+async function refreshFiles() {
+    if (!backendOk) return;
+    try {
+        const r=await fetch(API+'/list_files',{signal:AbortSignal.timeout(3000)});
+        const d=await r.json();
+        const list=document.getElementById('fileList');
+        if (!d.files||d.files.length===0){list.innerHTML='<p class="text-xs text-gray-400">No files yet.</p>';return;}
+        list.innerHTML='';
+        d.files.slice().reverse().forEach(f=>{
+            const div=document.createElement('div');
+            div.className='flex justify-between items-center p-3 rounded-xl bg-white/60 border border-white/50';
+            div.innerHTML=`<div><p class="text-sm font-medium text-gray-800">${f.name}</p>
+              <p class="text-xs text-gray-400">${fmtB(f.size)} · ${new Date(f.time*1000).toLocaleTimeString()}</p></div>
+              <a href="${API}/download/${encodeURIComponent(f.name)}" download="${f.name}"
+                 class="ml-3 px-3 py-1.5 rounded-lg bg-blue-600 text-white text-xs font-medium hover:bg-blue-700 transition">Download</a>`;
+            list.appendChild(div);
+        });
+    } catch(e){}
+}
+
+// ── Modal ─────────────────────────────────────────────────────────────────────
+function showModal(d) {
+    document.getElementById('modalMeta').innerHTML=
+        `<p><b>File:</b> ${d.filename}</p><p><b>Size:</b> ${fmtB(d.size)}</p>`+
+        `<p><b>Encryption:</b> AES-256-CBC</p><p><b>Modulation:</b> 8-FSK</p>`;
+    const tb=document.getElementById('modalText');
+    if (d.is_text&&d.text){ tb.textContent=d.text; tb.classList.remove('hidden'); }
+    else tb.classList.add('hidden');
+    document.getElementById('modalDl').href=API+'/download/'+encodeURIComponent(d.filename);
+    document.getElementById('modalDl').download=d.filename;
+    document.getElementById('modal').classList.add('on');
+}
+function closeModal(){ document.getElementById('modal').classList.remove('on'); }
+document.addEventListener('keydown',e=>{ if(e.key==='Escape') closeModal(); });
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+function fmtB(b){ return b<1024?b+'B':b<1048576?(b/1024).toFixed(1)+'KB':(b/1048576).toFixed(1)+'MB'; }
+
+// ── Tap detection ────────────────────────────────────────────────────────────
+let tapAutoThreshold = true;
+
+socket.on('tap_detected', d => {
+    const card   = document.getElementById('tapCard');
+    const dot    = document.getElementById('tapDot');
+    const status = document.getElementById('tapStatus');
+    const count  = document.getElementById('tapCount');
+    const rms    = document.getElementById('tapRms');
+
+    card.style.background   = 'rgba(34,197,94,0.12)';
+    card.style.borderColor  = 'rgba(34,197,94,0.4)';
+    dot.style.background    = '#22c55e';
+    dot.style.boxShadow     = '0 0 20px rgba(34,197,94,0.6)';
+    document.getElementById('tapIcon').style.color = 'white';
+
+    status.textContent = 'Vibration detected!';
+    status.style.color = '#16a34a';
+    count.textContent  = d.count;
+    rms.textContent    = Math.round(d.rms)+' cts';
+    lg('Tap #'+d.count+' — RMS: '+Math.round(d.rms)+' counts (thr: '+Math.round(d.threshold)+')', 'SUCCESS');
+});
+
+socket.on('tap_released', d => {
+    const card   = document.getElementById('tapCard');
+    const dot    = document.getElementById('tapDot');
+    const status = document.getElementById('tapStatus');
+
+    card.style.background  = '';
+    card.style.borderColor = '';
+    dot.style.background   = '#e5e7eb';
+    dot.style.boxShadow    = '';
+    document.getElementById('tapIcon').style.color = '#9ca3af';
+    status.textContent = 'Listening for vibration…';
+    status.style.color = '';
+});
+
+socket.on('signal_stats', d => {
+    document.getElementById('snr').textContent      = d.snr_db;
+    document.getElementById('sigBar').style.width   = d.signal_pct+'%';
+    document.getElementById('freqDisp').textContent = d.freq_hz+' Hz';
+    document.getElementById('ecc').textContent      = d.ecc||0;
+    if (d.rms !== undefined) {
+        document.getElementById('tapRms').textContent = Math.round(d.rms)+' cts';
+    }
+    if (d.tap_count !== undefined) {
+        document.getElementById('tapCount').textContent = d.tap_count;
+    }
+});
+
+async function updateThreshold(val) {
+    tapAutoThreshold = false;
+    // Slider 1-100 maps to ADC counts 40-800 (linear)
+    // Lower = more sensitive. Default 150 = good starting point.
+    const thr = Math.round(40 + (val / 100) * 760);
+    document.getElementById('thrVal').textContent = thr + ' cts';
+    try {
+        await fetch(API+'/set_threshold', {
+            method:'POST',
+            headers:{'Content-Type':'application/json'},
+            body: JSON.stringify({threshold: thr}),
+            signal: AbortSignal.timeout(2000)
+        });
+    } catch(e) {}
+}
+
+function resetThreshold() {
+    tapAutoThreshold = true;
+    document.getElementById('thrVal').textContent = 'auto';
+    document.getElementById('thrSlider').value    = 50;
+    // Backend will auto-set from noise_floor * 4 after calibration
+    lg('Threshold set to auto (calibrate for best results).','INFO');
+}
+
+// Init
+checkBackend();
+lg('SurfaceSync RX v2.1 ready.','SUCCESS');
+lg('Step 1: Run  python receiver_backend.py','INFO');
+lg('Step 2: Select ESP32-WROOM serial port','INFO');
+lg('Step 3: Click Start Listening','INFO');
+</script>
+</body>
+</html>
